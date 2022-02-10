@@ -1,13 +1,6 @@
 import { onMount } from 'svelte';
 import { get_base_uri } from './utils';
 
-function scroll_state() {
-	return {
-		x: pageXOffset,
-		y: pageYOffset
-	};
-}
-
 /**
  * @param {Event} event
  * @returns {HTMLAnchorElement | SVGAElement | undefined}
@@ -72,14 +65,6 @@ export class Router {
 	}
 
 	init_listeners() {
-		if ('scrollRestoration' in history) {
-			history.scrollRestoration = 'manual';
-		}
-
-		// Adopted from Nuxt.js
-		// Reset scrollRestoration to auto when leaving page, allowing page reload
-		// and back-navigation from other pages to use the browser to restore the
-		// scrolling position.
 		addEventListener('beforeunload', (e) => {
 			let should_block = false;
 
@@ -94,33 +79,7 @@ export class Router {
 			if (should_block) {
 				e.preventDefault();
 				e.returnValue = '';
-			} else {
-				history.scrollRestoration = 'auto';
 			}
-		});
-
-		// Setting scrollRestoration to manual again when returning to this page.
-		addEventListener('load', () => {
-			history.scrollRestoration = 'manual';
-		});
-
-		// There's no API to capture the scroll location right before the user
-		// hits the back/forward button, so we listen for scroll events
-
-		/** @type {NodeJS.Timeout} */
-		let scroll_timer;
-		addEventListener('scroll', () => {
-			clearTimeout(scroll_timer);
-			scroll_timer = setTimeout(() => {
-				// Store the scroll location in the history
-				// This will persist even if we navigate away from the site and come back
-				const new_state = {
-					...(history.state || {}),
-					'sveltekit:scroll': scroll_state()
-				};
-				history.replaceState(new_state, document.title, window.location.href);
-				// iOS scroll event intervals happen between 30-150ms, sometimes around 200ms
-			}, 200);
 		});
 
 		/** @param {Event} event */
@@ -189,9 +148,6 @@ export class Router {
 			// Removing the hash does a full page navigation in the browser, so make sure a hash is present
 			const [base, hash] = url.href.split('#');
 			if (hash !== undefined && base === location.href.split('#')[0]) {
-				// Call `pushState` to add url to history so going back works.
-				// Also make a delay, otherwise the browser default behaviour would not kick in
-				setTimeout(() => history.pushState({}, '', url.href));
 				const info = this.parse(url);
 				if (info) {
 					return this.renderer.update(info, [], false);
@@ -201,7 +157,7 @@ export class Router {
 
 			this._navigate({
 				url,
-				scroll: a.hasAttribute('sveltekit:noscroll') ? scroll_state() : null,
+				from_history: false,
 				keepfocus: false,
 				chain: [],
 				details: {
@@ -221,7 +177,7 @@ export class Router {
 
 				this._navigate({
 					url: new URL(location.href),
-					scroll: event.state['sveltekit:scroll'],
+					from_history: true,
 					keepfocus: false,
 					chain: [],
 					details: null,
@@ -271,7 +227,7 @@ export class Router {
 	 */
 	async goto(
 		href,
-		{ noscroll = false, replaceState = false, keepfocus = false, state = {} } = {},
+		{ replaceState = false, keepfocus = false, state = {} } = {},
 		chain
 	) {
 		const url = new URL(href, get_base_uri(document));
@@ -279,7 +235,7 @@ export class Router {
 		if (this.enabled) {
 			return this._navigate({
 				url,
-				scroll: noscroll ? scroll_state() : null,
+				from_history: false,
 				keepfocus,
 				chain,
 				details: {
@@ -348,7 +304,7 @@ export class Router {
 	/**
 	 * @param {{
 	 *   url: URL;
-	 *   scroll: { x: number, y: number } | null;
+	 *   from_history: boolean;
 	 *   keepfocus: boolean;
 	 *   chain: string[];
 	 *   details: {
@@ -359,7 +315,7 @@ export class Router {
 	 *   blocked: () => void;
 	 * }} opts
 	 */
-	async _navigate({ url, scroll, keepfocus, chain, details, accepted, blocked }) {
+	async _navigate({ url, from_history, keepfocus, chain, details, accepted, blocked }) {
 		const from = this.renderer.current.url;
 		let should_block = false;
 
@@ -409,7 +365,7 @@ export class Router {
 		}
 
 		await this.renderer.handle_navigation(info, chain, false, {
-			scroll,
+			from_history,
 			keepfocus
 		});
 
